@@ -8,13 +8,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export_background/state_manager.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 
 namespace ExportBackground {
 namespace {
 
-constexpr auto kStateVersion = 1;
+constexpr auto kStateVersion = 2;
 
 } // namespace
 
@@ -34,7 +35,9 @@ void StateManager::load() {
 		return;
 	}
 	const auto object = json.object();
-	if (object.value(u"version"_q).toInt() != kStateVersion) {
+	const auto version = object.value(u"version"_q).toInt();
+	if (version != kStateVersion) {
+		// Incompatible version, start fresh.
 		return;
 	}
 	deserialize(object);
@@ -57,21 +60,70 @@ bool StateManager::isChatCompleted(uint64 peerId) const {
 	return (i != end(_chats)) && i->second.completed;
 }
 
-int64 StateManager::lastMessageId(uint64 peerId) const {
+bool StateManager::isFilterCompleted(
+		uint64 peerId,
+		int filterIndex) const {
+	if (filterIndex < 0 || filterIndex >= kFilterCount) {
+		return true;
+	}
 	const auto i = _chats.find(peerId);
-	return (i != end(_chats)) ? i->second.lastMessageId : 0;
+	if (i == end(_chats)) {
+		return false;
+	}
+	return i->second.filters[filterIndex].completed;
 }
 
-void StateManager::updateChatProgress(
+int64 StateManager::lastMessageId(
 		uint64 peerId,
+		int filterIndex) const {
+	if (filterIndex < 0 || filterIndex >= kFilterCount) {
+		return 0;
+	}
+	const auto i = _chats.find(peerId);
+	return (i != end(_chats))
+		? i->second.filters[filterIndex].lastMessageId
+		: 0;
+}
+
+void StateManager::updateFilterProgress(
+		uint64 peerId,
+		int filterIndex,
 		int64 lastMessageId) {
+	if (filterIndex < 0 || filterIndex >= kFilterCount) {
+		return;
+	}
 	auto &state = _chats[peerId];
-	state.lastMessageId = lastMessageId;
+	state.filters[filterIndex].lastMessageId = lastMessageId;
+}
+
+void StateManager::markFilterCompleted(
+		uint64 peerId,
+		int filterIndex) {
+	if (filterIndex < 0 || filterIndex >= kFilterCount) {
+		return;
+	}
+	auto &state = _chats[peerId];
+	state.filters[filterIndex].completed = true;
+
+	// Check if all filters are completed.
+	bool allDone = true;
+	for (int i = 0; i < kFilterCount; ++i) {
+		if (!state.filters[i].completed) {
+			allDone = false;
+			break;
+		}
+	}
+	if (allDone) {
+		state.completed = true;
+	}
 }
 
 void StateManager::markChatCompleted(uint64 peerId) {
 	auto &state = _chats[peerId];
 	state.completed = true;
+	for (int i = 0; i < kFilterCount; ++i) {
+		state.filters[i].completed = true;
+	}
 }
 
 void StateManager::reset() {
@@ -83,8 +135,21 @@ QJsonObject StateManager::serialize() const {
 	auto chats = QJsonObject();
 	for (const auto &[peerId, state] : _chats) {
 		auto chat = QJsonObject();
-		chat.insert(u"last_message_id"_q, qint64(state.lastMessageId));
 		chat.insert(u"completed"_q, state.completed);
+
+		auto filtersArr = QJsonArray();
+		for (int i = 0; i < kFilterCount; ++i) {
+			auto filterObj = QJsonObject();
+			filterObj.insert(
+				u"last_message_id"_q,
+				qint64(state.filters[i].lastMessageId));
+			filterObj.insert(
+				u"completed"_q,
+				state.filters[i].completed);
+			filtersArr.append(filterObj);
+		}
+		chat.insert(u"filters"_q, filtersArr);
+
 		chats.insert(QString::number(peerId), chat);
 	}
 	auto result = QJsonObject();
@@ -102,9 +167,17 @@ void StateManager::deserialize(const QJsonObject &object) {
 		}
 		const auto chat = i.value().toObject();
 		auto state = ChatState();
-		state.lastMessageId = int64(
-			chat.value(u"last_message_id"_q).toDouble());
 		state.completed = chat.value(u"completed"_q).toBool();
+
+		const auto filtersArr = chat.value(u"filters"_q).toArray();
+		for (int f = 0; f < kFilterCount && f < filtersArr.size(); ++f) {
+			const auto filterObj = filtersArr[f].toObject();
+			state.filters[f].lastMessageId = int64(
+				filterObj.value(u"last_message_id"_q).toDouble());
+			state.filters[f].completed = filterObj.value(
+				u"completed"_q).toBool();
+		}
+
 		_chats.emplace(peerId, state);
 	}
 }
