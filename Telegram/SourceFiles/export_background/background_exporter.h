@@ -51,9 +51,9 @@ private:
 
 	not_null<Main::Session*> _session;
 	Config _config;
-	StateManager _state;
+	std::unique_ptr<StateManager> _state;
 	std::unique_ptr<FolderOrganizer> _folders;
-	RateLimiter _rateLimiter;
+	std::unique_ptr<RateLimiter> _rateLimiter;
 	MediaFetcher _mediaFetcher;
 
 	std::vector<DialogEntry> _dialogs;

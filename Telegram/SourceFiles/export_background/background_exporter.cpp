@@ -115,9 +115,6 @@ int64 PhotoSizeBytes(const MTPDphoto &photo, const QString &type) {
 BackgroundExporter::BackgroundExporter(
 		not_null<Main::Session*> session)
 : _session(session)
-, _config(Config::loadFromFile(Config::defaultConfigPath()))
-, _state(_config.basePath + u"exporter_state.json"_q)
-, _rateLimiter(_config.rateLimitDelay)
 , _mediaFetcher(session)
 , _waitTimer([this] { waitForDialogsAndStart(); }) {
 }
@@ -130,9 +127,15 @@ void BackgroundExporter::start() {
 	if (_running) {
 		return;
 	}
+
+	_config = Config::loadFromFile(Config::defaultConfigPath());
 	if (!_config.validate()) {
 		return;
 	}
+
+	_state = std::make_unique<StateManager>(
+		_config.basePath + u"exporter_state.json"_q);
+	_rateLimiter = std::make_unique<RateLimiter>(_config.rateLimitDelay);
 
 	_running = true;
 	waitForDialogsAndStart();
@@ -168,7 +171,7 @@ void BackgroundExporter::beginExport() {
 		return;
 	}
 
-	_state.load();
+	_state->load();
 	_folders = std::make_unique<FolderOrganizer>(_config.basePath);
 	if (!_folders->ensureBaseDirectory()) {
 		_running = false;
@@ -188,13 +191,13 @@ void BackgroundExporter::stop() {
 	_waitTimer.cancel();
 	_chatsLoadedLifetime.destroy();
 	_mediaFetcher.cancel();
-	_rateLimiter.cancel();
+	if (_rateLimiter) _rateLimiter->cancel();
 	_messageIterator.reset();
 	if (_textExporter) {
 		_textExporter->finalize();
 		_textExporter.reset();
 	}
-	_state.save();
+	_state->save();
 }
 
 void BackgroundExporter::processNextChat() {
@@ -210,7 +213,7 @@ void BackgroundExporter::processNextChat() {
 
 	while (++_dialogIndex < int(_dialogs.size())) {
 		const auto &dialog = _dialogs[_dialogIndex];
-		if (_state.isChatCompleted(dialog.peerId)) {
+		if (_state->isChatCompleted(dialog.peerId)) {
 			continue;
 		}
 
@@ -219,7 +222,7 @@ void BackgroundExporter::processNextChat() {
 		const auto chatPath = _folders->chatPath(
 			dialog.peerId,
 			dialog.peerName);
-		const auto resumeOffset = _state.lastMessageId(dialog.peerId);
+		const auto resumeOffset = _state->lastMessageId(dialog.peerId);
 
 		_messageIterator = std::make_unique<MessageIterator>(
 			_session,
@@ -234,7 +237,7 @@ void BackgroundExporter::processNextChat() {
 		return;
 	}
 
-	_state.save();
+	_state->save();
 	_running = false;
 }
 
@@ -245,10 +248,10 @@ void BackgroundExporter::processNextSlice() {
 
 	if (_messageIterator->finished()) {
 		const auto &dialog = _dialogs[_dialogIndex];
-		_state.markChatCompleted(dialog.peerId);
-		_state.save();
+		_state->markChatCompleted(dialog.peerId);
+		_state->save();
 
-		_rateLimiter.schedule([this] {
+		_rateLimiter->schedule([this] {
 			processNextChat();
 		});
 		return;
@@ -264,11 +267,11 @@ void BackgroundExporter::processNextSlice() {
 					u"^FLOOD_WAIT_(\\d+)$"_q
 				).match(error.type());
 				if (match.hasMatch()) {
-					_rateLimiter.handleFloodWait(
+					_rateLimiter->handleFloodWait(
 						match.captured(1).toInt());
 				}
 			}
-			_rateLimiter.schedule([this] {
+			_rateLimiter->schedule([this] {
 				processNextSlice();
 			});
 		});
@@ -386,7 +389,7 @@ void BackgroundExporter::processSlice(
 				}
 
 				const auto &dialog = _dialogs[_dialogIndex];
-				_state.updateChatProgress(dialog.peerId, msgId);
+				_state->updateChatProgress(dialog.peerId, msgId);
 			}, [](const auto &) {});
 		}
 	};
@@ -418,7 +421,7 @@ void BackgroundExporter::downloadNextMedia() {
 		task.size,
 		task.path,
 		[this](bool success) {
-			_rateLimiter.schedule([this] {
+			_rateLimiter->schedule([this] {
 				downloadNextMedia();
 			});
 		});
@@ -429,9 +432,9 @@ void BackgroundExporter::sliceFinished() {
 		return;
 	}
 
-	_state.save();
+	_state->save();
 
-	_rateLimiter.schedule([this] {
+	_rateLimiter->schedule([this] {
 		processNextSlice();
 	});
 }
