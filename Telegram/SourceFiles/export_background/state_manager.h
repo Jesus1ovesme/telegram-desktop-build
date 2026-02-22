@@ -19,15 +19,31 @@ public:
 	void save() const;
 
 	[[nodiscard]] bool isChatCompleted(uint64 peerId) const;
-	[[nodiscard]] int64 lastMessageId(uint64 peerId) const;
+	[[nodiscard]] bool isFilterCompleted(
+		uint64 peerId,
+		int filterIndex) const;
+	[[nodiscard]] int64 lastMessageId(
+		uint64 peerId,
+		int filterIndex) const;
 
-	void updateChatProgress(uint64 peerId, int64 lastMessageId);
+	void updateFilterProgress(
+		uint64 peerId,
+		int filterIndex,
+		int64 lastMessageId);
+	void markFilterCompleted(uint64 peerId, int filterIndex);
 	void markChatCompleted(uint64 peerId);
 	void reset();
 
+	static constexpr auto kFilterCount = 3;
+
 private:
-	struct ChatState {
+	struct FilterState {
 		int64 lastMessageId = 0;
+		bool completed = false;
+	};
+
+	struct ChatState {
+		FilterState filters[kFilterCount] = {};
 		bool completed = false;
 	};
 
