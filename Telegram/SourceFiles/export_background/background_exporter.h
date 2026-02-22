@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export_background/state_manager.h"
 #include "export_background/text_exporter.h"
 
+#include "base/timer.h"
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -39,6 +41,8 @@ private:
 		QString path;
 	};
 
+	void waitForDialogsAndStart();
+	void beginExport();
 	void processNextChat();
 	void processNextSlice();
 	void processSlice(const MTPmessages_Messages &result);
@@ -60,6 +64,8 @@ private:
 	std::vector<MediaTask> _mediaQueue;
 
 	bool _running = false;
+	base::Timer _waitTimer;
+	rpl::lifetime _chatsLoadedLifetime;
 
 };
 

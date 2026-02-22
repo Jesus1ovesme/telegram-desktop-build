@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "main/main_session.h"
 
+#include <QtCore/QTimer>
+
 namespace ExportBackground {
 namespace {
 
@@ -116,7 +118,8 @@ BackgroundExporter::BackgroundExporter(
 , _config(Config::loadFromFile(Config::defaultConfigPath()))
 , _state(_config.basePath + u"exporter_state.json"_q)
 , _rateLimiter(_config.rateLimitDelay)
-, _mediaFetcher(session) {
+, _mediaFetcher(session)
+, _waitTimer([this] { waitForDialogsAndStart(); }) {
 }
 
 BackgroundExporter::~BackgroundExporter() {
@@ -132,6 +135,39 @@ void BackgroundExporter::start() {
 	}
 
 	_running = true;
+	waitForDialogsAndStart();
+}
+
+void BackgroundExporter::waitForDialogsAndStart() {
+	if (!_running) {
+		return;
+	}
+
+	if (_session->data().chatsListLoaded()) {
+		beginExport();
+		return;
+	}
+
+	// Subscribe to the loaded event.
+	_chatsLoadedLifetime.destroy();
+	_session->data().chatsListLoadedEvents(
+	) | rpl::start_with_next([this](Data::Folder*) {
+		if (_session->data().chatsListLoaded()) {
+			_chatsLoadedLifetime.destroy();
+			_waitTimer.cancel();
+			beginExport();
+		}
+	}, _chatsLoadedLifetime);
+
+	// Fallback timer in case the event was already emitted.
+	_waitTimer.callOnce(5000);
+}
+
+void BackgroundExporter::beginExport() {
+	if (!_running) {
+		return;
+	}
+
 	_state.load();
 	_folders = std::make_unique<FolderOrganizer>(_config.basePath);
 	if (!_folders->ensureBaseDirectory()) {
@@ -149,6 +185,8 @@ void BackgroundExporter::stop() {
 		return;
 	}
 	_running = false;
+	_waitTimer.cancel();
+	_chatsLoadedLifetime.destroy();
 	_mediaFetcher.cancel();
 	_rateLimiter.cancel();
 	_messageIterator.reset();
