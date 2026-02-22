@@ -9,20 +9,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 
+#include <deque>
+
 namespace ExportBackground {
 
 class RateLimiter {
 public:
 	explicit RateLimiter(crl::time baseDelay);
 
-	void schedule(Fn<void()> callback);
+	void enqueue(Fn<void()> callback);
 	void handleFloodWait(int seconds);
 	void cancel();
 
 private:
+	void processQueue();
+
 	base::Timer _timer;
+	std::deque<Fn<void()>> _queue;
 	crl::time _baseDelay = 0;
 	crl::time _nextAllowed = 0;
+	bool _processing = false;
 
 };
 
