@@ -18,13 +18,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace ExportBackground {
 namespace {
 
-QString PeerName(
-		not_null<Main::Session*> session,
-		PeerId peerId) {
-	const auto peer = session->data().peerLoaded(peerId);
-	return peer ? peer->name() : u"Unknown"_q;
-}
-
 MediaFolder DocumentMediaFolder(const MTPDdocument &data) {
 	for (const auto &attr : data.vattributes().v) {
 		if (attr.type() == mtpc_documentAttributeAudio) {
@@ -115,7 +108,6 @@ int64 PhotoSizeBytes(const MTPDphoto &photo, const QString &type) {
 BackgroundExporter::BackgroundExporter(
 		not_null<Main::Session*> session)
 : _session(session)
-, _mediaFetcher(session)
 , _waitTimer([this] { waitForDialogsAndStart(); }) {
 }
 
@@ -151,7 +143,6 @@ void BackgroundExporter::waitForDialogsAndStart() {
 		return;
 	}
 
-	// Subscribe to the loaded event.
 	_chatsLoadedLifetime.destroy();
 	_session->data().chatsListLoadedEvents(
 	) | rpl::on_next([this](Data::Folder*) {
@@ -162,7 +153,6 @@ void BackgroundExporter::waitForDialogsAndStart() {
 		}
 	}, _chatsLoadedLifetime);
 
-	// Fallback timer in case the event was already emitted.
 	_waitTimer.callOnce(5000);
 }
 
@@ -178,9 +168,9 @@ void BackgroundExporter::beginExport() {
 		return;
 	}
 	_dialogs = DialogScanner::scan(_session);
-	_dialogIndex = -1;
+	_nextDialogIndex = 0;
 
-	processNextChat();
+	startNextBatch();
 }
 
 void BackgroundExporter::stop() {
@@ -190,126 +180,168 @@ void BackgroundExporter::stop() {
 	_running = false;
 	_waitTimer.cancel();
 	_chatsLoadedLifetime.destroy();
-	_mediaFetcher.cancel();
-	if (_rateLimiter) _rateLimiter->cancel();
-	_messageIterator.reset();
-	if (_textExporter) {
-		_textExporter->finalize();
-		_textExporter.reset();
+	if (_rateLimiter) {
+		_rateLimiter->cancel();
 	}
-	_state->save();
+	for (auto &worker : _workers) {
+		if (worker) {
+			worker->searchIterator.reset();
+			if (worker->mediaFetcher) {
+				worker->mediaFetcher->cancel();
+			}
+		}
+	}
+	_workers.clear();
+	_activeWorkerCount = 0;
+	if (_state) {
+		_state->save();
+	}
 }
 
-void BackgroundExporter::processNextChat() {
+void BackgroundExporter::startNextBatch() {
 	if (!_running) {
 		return;
 	}
 
-	_messageIterator.reset();
-	if (_textExporter) {
-		_textExporter->finalize();
-		_textExporter.reset();
-	}
+	_workers.clear();
+	_activeWorkerCount = 0;
 
-	while (++_dialogIndex < int(_dialogs.size())) {
-		const auto &dialog = _dialogs[_dialogIndex];
+	while (_nextDialogIndex < int(_dialogs.size())
+			&& int(_workers.size()) < _config.parallelChats) {
+		const auto dialogIndex = _nextDialogIndex++;
+		const auto &dialog = _dialogs[dialogIndex];
+
 		if (_state->isChatCompleted(dialog.peerId)) {
 			continue;
 		}
 
 		_folders->ensureChatDirectories(dialog.peerId, dialog.peerName);
 
-		const auto chatPath = _folders->chatPath(
-			dialog.peerId,
-			dialog.peerName);
-		const auto resumeOffset = _state->lastMessageId(dialog.peerId);
+		auto worker = std::make_unique<ChatWorker>();
+		worker->dialogIndex = dialogIndex;
+		worker->mediaFetcher = std::make_unique<MediaFetcher>(_session);
+		worker->currentFilterIndex = 0;
+		worker->finished = false;
+		_workers.push_back(std::move(worker));
+		++_activeWorkerCount;
+	}
 
-		_messageIterator = std::make_unique<MessageIterator>(
-			_session,
-			dialog.peerId,
-			resumeOffset);
-		_textExporter = std::make_unique<TextExporter>(
-			chatPath,
-			_config.exportJson,
-			_config.exportHtml);
-
-		processNextSlice();
+	if (_activeWorkerCount == 0) {
+		_state->save();
+		_running = false;
 		return;
 	}
 
-	_state->save();
-	_running = false;
+	for (int i = 0; i < int(_workers.size()); ++i) {
+		workerStartNextFilter(i);
+	}
 }
 
-void BackgroundExporter::processNextSlice() {
-	if (!_running || !_messageIterator) {
+void BackgroundExporter::workerStartNextFilter(int workerIndex) {
+	if (!_running || workerIndex >= int(_workers.size())) {
+		return;
+	}
+	auto &worker = *_workers[workerIndex];
+	const auto &dialog = _dialogs[worker.dialogIndex];
+
+	// Skip completed filters.
+	while (worker.currentFilterIndex < kMediaFilterCount) {
+		if (!_state->isFilterCompleted(
+				dialog.peerId,
+				worker.currentFilterIndex)) {
+			break;
+		}
+		++worker.currentFilterIndex;
+	}
+
+	if (worker.currentFilterIndex >= kMediaFilterCount) {
+		onWorkerFinished(workerIndex);
 		return;
 	}
 
-	if (_messageIterator->finished()) {
-		const auto &dialog = _dialogs[_dialogIndex];
-		_state->markChatCompleted(dialog.peerId);
+	const auto resumeOffset = _state->lastMessageId(
+		dialog.peerId,
+		worker.currentFilterIndex);
+
+	worker.searchIterator = std::make_unique<MessageIterator>(
+		_session,
+		dialog.peerId,
+		mediaFilterForIndex(worker.currentFilterIndex),
+		resumeOffset);
+
+	workerRequestNextSlice(workerIndex);
+}
+
+void BackgroundExporter::workerRequestNextSlice(int workerIndex) {
+	if (!_running || workerIndex >= int(_workers.size())) {
+		return;
+	}
+	auto &worker = *_workers[workerIndex];
+
+	if (!worker.searchIterator || worker.searchIterator->finished()) {
+		const auto &dialog = _dialogs[worker.dialogIndex];
+		_state->markFilterCompleted(
+			dialog.peerId,
+			worker.currentFilterIndex);
 		_state->save();
 
-		_rateLimiter->schedule([this] {
-			processNextChat();
+		++worker.currentFilterIndex;
+		_rateLimiter->enqueue([this, workerIndex] {
+			workerStartNextFilter(workerIndex);
 		});
 		return;
 	}
 
-	_messageIterator->requestNextSlice(
-		[this](const MTPmessages_Messages &result) {
-			processSlice(result);
-		},
-		[this](const MTP::Error &error) {
-			if (MTP::IsFloodError(error)) {
-				const auto match = QRegularExpression(
-					u"^FLOOD_WAIT_(\\d+)$"_q
-				).match(error.type());
-				if (match.hasMatch()) {
-					_rateLimiter->handleFloodWait(
-						match.captured(1).toInt());
+	_rateLimiter->enqueue([this, workerIndex] {
+		if (!_running || workerIndex >= int(_workers.size())) {
+			return;
+		}
+		auto &w = *_workers[workerIndex];
+		if (!w.searchIterator) {
+			return;
+		}
+		w.searchIterator->requestNextSlice(
+			[this, workerIndex](const MTPmessages_Messages &result) {
+				workerProcessSlice(workerIndex, result);
+			},
+			[this, workerIndex](const MTP::Error &error) {
+				if (MTP::IsFloodError(error)) {
+					const auto match = QRegularExpression(
+						u"^FLOOD_WAIT_(\\d+)$"_q
+					).match(error.type());
+					if (match.hasMatch()) {
+						_rateLimiter->handleFloodWait(
+							match.captured(1).toInt());
+					}
 				}
-			}
-			_rateLimiter->schedule([this] {
-				processNextSlice();
+				_rateLimiter->enqueue([this, workerIndex] {
+					workerRequestNextSlice(workerIndex);
+				});
 			});
-		});
+	});
 }
 
-void BackgroundExporter::processSlice(
+void BackgroundExporter::workerProcessSlice(
+		int workerIndex,
 		const MTPmessages_Messages &result) {
-	if (!_running) {
+	if (!_running || workerIndex >= int(_workers.size())) {
 		return;
 	}
+	auto &worker = *_workers[workerIndex];
+	const auto &dialog = _dialogs[worker.dialogIndex];
 
-	_mediaQueue.clear();
+	worker.mediaQueue.clear();
 
 	const auto processMessages = [&](const auto &messages) {
 		for (const auto &message : messages) {
 			message.match([&](const MTPDmessage &data) {
 				const auto msgId = int64(data.vid().v);
-				const auto date = data.vdate().v;
-				const auto fromPeerId = data.vfrom_id()
-					? peerFromMTP(*data.vfrom_id())
-					: PeerId(0);
-				const auto fromName = fromPeerId
-					? PeerName(_session, fromPeerId)
-					: QString();
-
-				_textExporter->appendMessage({
-					.id = msgId,
-					.date = date,
-					.fromName = fromName,
-					.text = qs(data.vmessage()),
-				});
 
 				if (const auto media = data.vmedia()) {
-					const auto &dialog = _dialogs[_dialogIndex];
 					media->match([&](
 							const MTPDmessageMediaPhoto &photoData) {
-						if (!((_config.mediaTypes
-								& Config::MediaType::Photo))) {
+						if (!(_config.mediaTypes
+								& Config::MediaType::Photo)) {
 							return;
 						}
 						const auto photo = photoData.vphoto();
@@ -332,7 +364,7 @@ void BackgroundExporter::processSlice(
 							const auto size = PhotoSizeBytes(
 								data,
 								sizeType);
-							_mediaQueue.push_back({
+							worker.mediaQueue.push_back({
 								.location = MTP_inputPhotoFileLocation(
 									data.vid(),
 									data.vaccess_hash(),
@@ -364,7 +396,7 @@ void BackgroundExporter::processSlice(
 									return Config::MediaType::File;
 								}
 							}();
-							if (!((_config.mediaTypes & type))) {
+							if (!(_config.mediaTypes & type)) {
 								return;
 							}
 							const auto fileName = DocumentFileName(
@@ -374,7 +406,7 @@ void BackgroundExporter::processSlice(
 								dialog.peerId,
 								dialog.peerName,
 								folder) + fileName;
-							_mediaQueue.push_back({
+							worker.mediaQueue.push_back({
 								.location = MTP_inputDocumentFileLocation(
 									data.vid(),
 									data.vaccess_hash(),
@@ -388,8 +420,10 @@ void BackgroundExporter::processSlice(
 					}, [](const auto &) {});
 				}
 
-				const auto &dialog = _dialogs[_dialogIndex];
-				_state->updateChatProgress(dialog.peerId, msgId);
+				_state->updateFilterProgress(
+					dialog.peerId,
+					worker.currentFilterIndex,
+					msgId);
 			}, [](const auto &) {});
 		}
 	};
@@ -399,44 +433,77 @@ void BackgroundExporter::processSlice(
 		processMessages(data.vmessages().v);
 	});
 
-	downloadNextMedia();
+	workerDownloadNextMedia(workerIndex);
 }
 
-void BackgroundExporter::downloadNextMedia() {
-	if (!_running) {
+void BackgroundExporter::workerDownloadNextMedia(int workerIndex) {
+	if (!_running || workerIndex >= int(_workers.size())) {
+		return;
+	}
+	auto &worker = *_workers[workerIndex];
+
+	if (worker.mediaQueue.empty()) {
+		workerSliceFinished(workerIndex);
 		return;
 	}
 
-	if (_mediaQueue.empty()) {
-		sliceFinished();
-		return;
-	}
+	auto task = std::move(worker.mediaQueue.back());
+	worker.mediaQueue.pop_back();
 
-	auto task = std::move(_mediaQueue.back());
-	_mediaQueue.pop_back();
-
-	_mediaFetcher.download(
+	worker.mediaFetcher->download(
 		task.location,
 		task.dcId,
 		task.size,
 		task.path,
-		[this](bool success) {
-			_rateLimiter->schedule([this] {
-				downloadNextMedia();
+		[this, workerIndex](bool success) {
+			_rateLimiter->enqueue([this, workerIndex] {
+				workerDownloadNextMedia(workerIndex);
 			});
 		});
 }
 
-void BackgroundExporter::sliceFinished() {
-	if (!_running) {
+void BackgroundExporter::workerSliceFinished(int workerIndex) {
+	if (!_running || workerIndex >= int(_workers.size())) {
 		return;
 	}
 
 	_state->save();
 
-	_rateLimiter->schedule([this] {
-		processNextSlice();
-	});
+	workerRequestNextSlice(workerIndex);
+}
+
+void BackgroundExporter::onWorkerFinished(int workerIndex) {
+	if (workerIndex >= int(_workers.size())) {
+		return;
+	}
+	auto &worker = *_workers[workerIndex];
+	worker.finished = true;
+	worker.searchIterator.reset();
+	--_activeWorkerCount;
+
+	checkBatchComplete();
+}
+
+void BackgroundExporter::checkBatchComplete() {
+	if (!_running) {
+		return;
+	}
+
+	if (_activeWorkerCount > 0) {
+		return;
+	}
+
+	_state->save();
+	startNextBatch();
+}
+
+MTPMessagesFilter BackgroundExporter::mediaFilterForIndex(int index) const {
+	switch (index) {
+	case 0: return MTP_inputMessagesFilterPhotos();
+	case 1: return MTP_inputMessagesFilterVideo();
+	case 2: return MTP_inputMessagesFilterRoundVideo();
+	}
+	return MTP_inputMessagesFilterPhotos();
 }
 
 } // namespace ExportBackground
