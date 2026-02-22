@@ -35,6 +35,7 @@ struct Config {
 	[[nodiscard]] static Config loadFromFile(const QString &path);
 	void saveToFile(const QString &path) const;
 	[[nodiscard]] static QString defaultConfigPath();
+	[[nodiscard]] static QString defaultBasePath();
 };
 
 } // namespace ExportBackground

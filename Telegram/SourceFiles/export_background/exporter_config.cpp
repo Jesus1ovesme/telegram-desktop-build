@@ -38,15 +38,22 @@ Config Config::loadFromFile(const QString &path) {
 	auto result = Config();
 	auto f = QFile(path);
 	if (!f.open(QIODevice::ReadOnly)) {
+		result.basePath = defaultBasePath();
+		result.saveToFile(path);
 		return result;
 	}
 	const auto data = f.readAll();
 	const auto json = QJsonDocument::fromJson(data);
 	if (!json.isObject()) {
+		result.basePath = defaultBasePath();
+		result.saveToFile(path);
 		return result;
 	}
 	const auto object = json.object();
 	result.basePath = object.value(u"base_path"_q).toString();
+	if (result.basePath.isEmpty()) {
+		result.basePath = defaultBasePath();
+	}
 	result.rateLimitDelay = crl::time(
 		object.value(u"rate_limit_delay_ms"_q).toInt(
 			int(kDefaultRateLimitDelay)));
@@ -61,6 +68,10 @@ Config Config::loadFromFile(const QString &path) {
 	result.mediaTypes = MediaTypes::from_raw(mediaTypesValue);
 
 	return result;
+}
+
+QString Config::defaultBasePath() {
+	return cWorkingDir() + u"tdata/exports/"_q;
 }
 
 void Config::saveToFile(const QString &path) const {
