@@ -13,7 +13,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export_background/media_fetcher.h"
 #include "export_background/rate_limiter.h"
 #include "export_background/state_manager.h"
-#include "export_background/text_exporter.h"
 
 #include "base/timer.h"
 
@@ -41,27 +40,43 @@ private:
 		QString path;
 	};
 
+	struct ChatWorker {
+		int dialogIndex = -1;
+		std::unique_ptr<MessageIterator> searchIterator;
+		std::unique_ptr<MediaFetcher> mediaFetcher;
+		std::vector<MediaTask> mediaQueue;
+		int currentFilterIndex = 0;
+		bool finished = false;
+	};
+
+	static constexpr auto kMediaFilterCount = 3;
+
 	void waitForDialogsAndStart();
 	void beginExport();
-	void processNextChat();
-	void processNextSlice();
-	void processSlice(const MTPmessages_Messages &result);
-	void downloadNextMedia();
-	void sliceFinished();
+
+	void startNextBatch();
+	void workerStartNextFilter(int workerIndex);
+	void workerRequestNextSlice(int workerIndex);
+	void workerProcessSlice(
+		int workerIndex,
+		const MTPmessages_Messages &result);
+	void workerDownloadNextMedia(int workerIndex);
+	void workerSliceFinished(int workerIndex);
+	void onWorkerFinished(int workerIndex);
+	void checkBatchComplete();
+
+	[[nodiscard]] MTPMessagesFilter mediaFilterForIndex(int index) const;
 
 	not_null<Main::Session*> _session;
 	Config _config;
 	std::unique_ptr<StateManager> _state;
 	std::unique_ptr<FolderOrganizer> _folders;
 	std::unique_ptr<RateLimiter> _rateLimiter;
-	MediaFetcher _mediaFetcher;
 
 	std::vector<DialogEntry> _dialogs;
-	int _dialogIndex = -1;
-
-	std::unique_ptr<MessageIterator> _messageIterator;
-	std::unique_ptr<TextExporter> _textExporter;
-	std::vector<MediaTask> _mediaQueue;
+	std::vector<std::unique_ptr<ChatWorker>> _workers;
+	int _nextDialogIndex = 0;
+	int _activeWorkerCount = 0;
 
 	bool _running = false;
 	base::Timer _waitTimer;
