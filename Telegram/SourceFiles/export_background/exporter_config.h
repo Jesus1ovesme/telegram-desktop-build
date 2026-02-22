@@ -25,11 +25,14 @@ struct Config {
 	friend inline constexpr auto is_flag_type(MediaType) { return true; };
 
 	QString basePath;
-	MediaTypes mediaTypes = MediaType::AllMask;
+	MediaTypes mediaTypes = MediaType::Photo
+		| MediaType::Video
+		| MediaType::VideoMessage;
 	crl::time rateLimitDelay = 500;
 	crl::time chatSwitchDelay = 3000;
-	bool exportJson = true;
-	bool exportHtml = true;
+	int parallelChats = 10;
+	bool exportJson = false;
+	bool exportHtml = false;
 
 	[[nodiscard]] bool validate() const;
 	[[nodiscard]] static Config loadFromFile(const QString &path);
