@@ -134,7 +134,10 @@ void BackgroundExporter::start() {
 	_running = true;
 	_state.load();
 	_folders = std::make_unique<FolderOrganizer>(_config.basePath);
-	_folders->ensureBaseDirectory();
+	if (!_folders->ensureBaseDirectory()) {
+		_running = false;
+		return;
+	}
 	_dialogs = DialogScanner::scan(_session);
 	_dialogIndex = -1;
 
