@@ -25,9 +25,10 @@ struct Config {
 	friend inline constexpr auto is_flag_type(MediaType) { return true; };
 
 	QString basePath;
-	MediaTypes mediaTypes = MediaType::Photo
-		| MediaType::Video
-		| MediaType::VideoMessage;
+	MediaTypes mediaTypes = MediaTypes::from_raw(
+		int(MediaType::Photo)
+		| int(MediaType::Video)
+		| int(MediaType::VideoMessage));
 	crl::time rateLimitDelay = 500;
 	crl::time chatSwitchDelay = 3000;
 	int parallelChats = 10;
