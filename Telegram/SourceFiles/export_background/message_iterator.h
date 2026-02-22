@@ -22,6 +22,7 @@ public:
 	MessageIterator(
 		not_null<Main::Session*> session,
 		uint64 peerId,
+		MTPMessagesFilter filter,
 		int64 resumeOffsetId);
 
 	void requestNextSlice(
@@ -37,6 +38,7 @@ private:
 	MTP::Sender _api;
 	not_null<Main::Session*> _session;
 	uint64 _peerId = 0;
+	MTPMessagesFilter _filter;
 	int64 _offsetId = 0;
 	bool _finished = false;
 
