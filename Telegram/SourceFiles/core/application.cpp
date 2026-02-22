@@ -202,7 +202,7 @@ Application::Application()
 		}
 	}, _lifetime);
 
-	_domain->activeSessionChanges(
+	_domain->activeSessionValue(
 	) | rpl::on_next([=](Main::Session *session) {
 		if (session) {
 			_backgroundExporter = std::make_unique<
