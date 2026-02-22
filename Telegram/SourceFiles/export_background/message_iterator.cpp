@@ -16,10 +16,12 @@ namespace ExportBackground {
 MessageIterator::MessageIterator(
 		not_null<Main::Session*> session,
 		uint64 peerId,
+		MTPMessagesFilter filter,
 		int64 resumeOffsetId)
 : _api(&session->mtp())
 , _session(session)
 , _peerId(peerId)
+, _filter(filter)
 , _offsetId(resumeOffsetId) {
 }
 
@@ -31,10 +33,19 @@ void MessageIterator::requestNextSlice(
 	}
 	const auto peerId = PeerId(PeerIdHelper(_peerId));
 	const auto peer = _session->data().peer(peerId);
-	_api.request(MTPmessages_GetHistory(
+	using Flag = MTPmessages_Search::Flag;
+	_api.request(MTPmessages_Search(
+		MTP_flags(Flag(0)),
 		peer->input(),
-		MTP_int(int32(_offsetId)),
+		MTP_string(),
+		MTP_inputPeerEmpty(),
+		MTPInputPeer(),
+		MTPVector<MTPReaction>(),
 		MTP_int(0),
+		_filter,
+		MTP_int(0),
+		MTP_int(0),
+		MTP_int(int32(_offsetId)),
 		MTP_int(0),
 		MTP_int(kSliceLimit),
 		MTP_int(0),
@@ -79,6 +90,9 @@ void MessageIterator::updatePagination(
 		extractMinId(data.vmessages().v);
 	});
 	if (count > 0 && count < kSliceLimit) {
+		_finished = true;
+	}
+	if (count == 0) {
 		_finished = true;
 	}
 	if (minId) {
