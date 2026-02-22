@@ -151,7 +151,7 @@ void BackgroundExporter::waitForDialogsAndStart() {
 	// Subscribe to the loaded event.
 	_chatsLoadedLifetime.destroy();
 	_session->data().chatsListLoadedEvents(
-	) | rpl::start_with_next([this](Data::Folder*) {
+	) | rpl::on_next([this](Data::Folder*) {
 		if (_session->data().chatsListLoaded()) {
 			_chatsLoadedLifetime.destroy();
 			_waitTimer.cancel();
