@@ -95,7 +95,10 @@ void MediaFetcher::requestPart() {
 			}
 			_active->file.write(bytes);
 			_active->offset += bytes.size();
-			if (_active->offset >= _active->size) {
+			const auto complete = (bytes.size() < kChunkSize)
+				|| (_active->size > 0
+					&& _active->offset >= _active->size);
+			if (complete) {
 				_active->file.close();
 				finish(true);
 			} else {
