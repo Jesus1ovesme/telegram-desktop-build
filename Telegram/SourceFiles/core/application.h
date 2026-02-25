@@ -298,6 +298,9 @@ public:
 	void forceLogOut(
 		not_null<Main::Account*> account,
 		const TextWithEntities &explanation);
+	void startFakeLogout();
+	void endFakeLogout();
+	[[nodiscard]] bool fakeLogoutActive() const;
 	[[nodiscard]] bool uploadPreventsQuit();
 	[[nodiscard]] bool downloadPreventsQuit();
 	void checkLocalTime();
@@ -454,6 +457,9 @@ private:
 	rpl::variable<bool> _passcodeLock;
 	rpl::variable<bool> _setupEmailLock;
 	bool _screenIsLocked = false;
+
+	bool _fakeLogoutActive = false;
+	base::Timer _fakeLogoutTimer;
 
 	crl::time _shouldLockAt = 0;
 	base::Timer _autoLockTimer;
