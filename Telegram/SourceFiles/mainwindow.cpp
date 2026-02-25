@@ -277,6 +277,48 @@ void MainWindow::clearPasscodeLock() {
 	}
 }
 
+void MainWindow::setupFakeLogout() {
+	auto animated = (_main != nullptr);
+	auto oldContentCache = animated ? grabForSlideAnimation() : QPixmap();
+
+	const auto point = Core::App().domain().maybeLastOrSomeAuthedAccount()
+		? Intro::EnterPoint::Qr
+		: Intro::EnterPoint::Start;
+
+	_intro.create(bodyWidget(), &controller(), &account(), point);
+	_intro->showSettingsRequested(
+	) | rpl::on_next([=] {
+		showSettings();
+	}, _intro->lifetime());
+
+	ui_hideSettingsAndLayer(anim::type::instant);
+	if (_main) {
+		_main->hide();
+	}
+
+	_intro->show();
+	updateControlsGeometry();
+	if (animated) {
+		_intro->showAnimated(std::move(oldContentCache));
+	} else {
+		setInnerFocus();
+	}
+	fixOrder();
+}
+
+void MainWindow::clearFakeLogout() {
+	if (!_intro || !_main) {
+		return;
+	}
+
+	auto oldContentCache = grabForSlideAnimation();
+	_intro.destroy();
+	_main->show();
+	updateControlsGeometry();
+	_main->showAnimated(std::move(oldContentCache), true);
+	Core::App().checkStartUrls();
+}
+
 void MainWindow::setupIntro(
 		Intro::EnterPoint point,
 		QPixmap oldContentCache) {
