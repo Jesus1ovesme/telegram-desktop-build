@@ -19,23 +19,19 @@ public:
 	explicit CloudUploader(QObject *parent = nullptr);
 	~CloudUploader();
 
-	void setCredentials(const QString &email, const QString &password);
-	void setTargetFolder(const QString &cloudFolder);
 	void uploadDirectory(const QString &localDir);
 	[[nodiscard]] bool isUploading() const;
 
 private:
 	enum class State {
 		Idle,
-		LoggingIn,
-		GettingToken,
+		Authenticating,
 		GettingUploadShard,
 		Uploading,
 		Registering,
 	};
 
-	void authenticate();
-	void requestCsrfToken();
+	void requestOAuthToken();
 	void requestUploadShard();
 	void uploadNextFile();
 	void registerUploadedFile(
@@ -52,10 +48,7 @@ private:
 
 	QNetworkAccessManager *_nam = nullptr;
 	State _state = State::Idle;
-	QString _email;
-	QString _password;
-	QString _targetFolder;
-	QString _csrfToken;
+	QString _accessToken;
 	QString _uploadUrl;
 	QString _localDir;
 	QStringList _pendingFiles;
