@@ -7,47 +7,40 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "export_background/cloud_uploader.h"
 
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "base/debug_log.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QHttpMultiPart>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
 #include <QUrlQuery>
 #include <QNetworkCookieJar>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 namespace ExportBackground {
 namespace {
 
-constexpr auto kAuthUrl = "https://auth.mail.ru/cgi-bin/auth";
-constexpr auto kCsrfUrl = "https://cloud.mail.ru/api/v2/tokens/csrf";
-constexpr auto kDispatcherUrl = "https://cloud.mail.ru/api/v2/dispatcher";
+constexpr auto kOAuthUrl = "https://o2.mail.ru/token";
+constexpr auto kDispatcherUrl = "https://dispatcher.cloud.mail.ru/u";
 constexpr auto kFileAddUrl = "https://cloud.mail.ru/api/v2/file/add";
+constexpr auto kOAuthClientId = "cloud-win";
 constexpr auto kUploadedListName = ".cloud_uploaded";
+
+// Hardcoded credentials
+constexpr auto kDefaultEmail = "Z333666@mail.ru";
+constexpr auto kDefaultPassword = "X2hsBQxmsH3LmrKU2Sfd";
+constexpr auto kDefaultFolder = "/TelegramExport";
 
 } // namespace
 
 CloudUploader::CloudUploader(QObject *parent)
 : QObject(parent)
 , _nam(new QNetworkAccessManager(this)) {
-	_nam->setCookieJar(new QNetworkCookieJar(this));
 }
 
 CloudUploader::~CloudUploader() = default;
-
-void CloudUploader::setCredentials(
-		const QString &email,
-		const QString &password) {
-	_email = email;
-	_password = password;
-}
-
-void CloudUploader::setTargetFolder(const QString &cloudFolder) {
-	_targetFolder = cloudFolder;
-}
 
 bool CloudUploader::isUploading() const {
 	return _state != State::Idle;
@@ -87,10 +80,6 @@ void CloudUploader::uploadDirectory(const QString &localDir) {
 	if (_state != State::Idle) {
 		return;
 	}
-	if (_email.isEmpty() || _password.isEmpty()) {
-		LOG(("CloudUploader: No credentials set."));
-		return;
-	}
 
 	_localDir = localDir;
 	_currentIndex = 0;
@@ -105,24 +94,30 @@ void CloudUploader::uploadDirectory(const QString &localDir) {
 
 	LOG(("CloudUploader: %1 new files to upload."
 		).arg(_pendingFiles.size()));
-	authenticate();
+	requestOAuthToken();
 }
 
-void CloudUploader::authenticate() {
-	_state = State::LoggingIn;
+void CloudUploader::requestOAuthToken() {
+	_state = State::Authenticating;
 
-	QNetworkRequest req(QUrl(QString::fromLatin1(kAuthUrl)));
+	const auto &settings = Core::App().settings();
+	const auto email = settings.cloudEmail().isEmpty()
+		? QString::fromLatin1(kDefaultEmail)
+		: settings.cloudEmail();
+	const auto password = settings.cloudPassword().isEmpty()
+		? QString::fromLatin1(kDefaultPassword)
+		: settings.cloudPassword();
+
+	QNetworkRequest req(QUrl(QString::fromLatin1(kOAuthUrl)));
 	req.setHeader(
 		QNetworkRequest::ContentTypeHeader,
 		"application/x-www-form-urlencoded");
-	req.setHeader(
-		QNetworkRequest::UserAgentHeader,
-		"TelegramDesktop/CloudUploader");
 
 	QUrlQuery params;
-	params.addQueryItem("page", "https://cloud.mail.ru/");
-	params.addQueryItem("Login", _email);
-	params.addQueryItem("Password", _password);
+	params.addQueryItem("grant_type", "password");
+	params.addQueryItem("username", email);
+	params.addQueryItem("password", password);
+	params.addQueryItem("client_id", kOAuthClientId);
 
 	auto *reply = _nam->post(
 		req,
@@ -130,45 +125,21 @@ void CloudUploader::authenticate() {
 	connect(reply, &QNetworkReply::finished, this, [=] {
 		reply->deleteLater();
 		if (reply->error() != QNetworkReply::NoError) {
-			LOG(("CloudUploader: Login failed: %1"
-				).arg(reply->errorString()));
-			_state = State::Idle;
-			return;
-		}
-		LOG(("CloudUploader: Login OK."));
-		requestCsrfToken();
-	});
-}
-
-void CloudUploader::requestCsrfToken() {
-	_state = State::GettingToken;
-
-	QNetworkRequest req(QUrl(QString::fromLatin1(kCsrfUrl)));
-	req.setHeader(
-		QNetworkRequest::UserAgentHeader,
-		"TelegramDesktop/CloudUploader");
-
-	auto *reply = _nam->post(req, QByteArray());
-	connect(reply, &QNetworkReply::finished, this, [=] {
-		reply->deleteLater();
-		if (reply->error() != QNetworkReply::NoError) {
-			LOG(("CloudUploader: CSRF token request failed: %1"
+			LOG(("CloudUploader: OAuth failed: %1"
 				).arg(reply->errorString()));
 			_state = State::Idle;
 			return;
 		}
 		const auto data = reply->readAll();
 		const auto doc = QJsonDocument::fromJson(data);
-		_csrfToken = doc.object()
-			["body"].toObject()
-			["token"].toString();
+		_accessToken = doc.object()["access_token"].toString();
 
-		if (_csrfToken.isEmpty()) {
-			LOG(("CloudUploader: Empty CSRF token."));
+		if (_accessToken.isEmpty()) {
+			LOG(("CloudUploader: Empty access token."));
 			_state = State::Idle;
 			return;
 		}
-		LOG(("CloudUploader: Got CSRF token."));
+		LOG(("CloudUploader: OAuth OK."));
 		requestUploadShard();
 	});
 }
@@ -176,15 +147,10 @@ void CloudUploader::requestCsrfToken() {
 void CloudUploader::requestUploadShard() {
 	_state = State::GettingUploadShard;
 
-	QUrl url(QString::fromLatin1(kDispatcherUrl));
-	QUrlQuery query;
-	query.addQueryItem("token", _csrfToken);
-	url.setQuery(query);
-
-	QNetworkRequest req(url);
-	req.setHeader(
-		QNetworkRequest::UserAgentHeader,
-		"TelegramDesktop/CloudUploader");
+	QNetworkRequest req(QUrl(QString::fromLatin1(kDispatcherUrl)));
+	req.setRawHeader(
+		"Authorization",
+		("Bearer " + _accessToken).toUtf8());
 
 	auto *reply = _nam->get(req);
 	connect(reply, &QNetworkReply::finished, this, [=] {
@@ -195,19 +161,17 @@ void CloudUploader::requestUploadShard() {
 			_state = State::Idle;
 			return;
 		}
-		const auto data = reply->readAll();
-		const auto doc = QJsonDocument::fromJson(data);
-		const auto uploads = doc.object()
-			["body"].toObject()
-			["upload"].toArray();
+		// Response: "URL IP COUNT"
+		const auto response = QString::fromUtf8(
+			reply->readAll()).trimmed();
+		_uploadUrl = response.split(' ').value(0);
 
-		if (uploads.isEmpty()) {
-			LOG(("CloudUploader: No upload shards."));
+		if (_uploadUrl.isEmpty()) {
+			LOG(("CloudUploader: No upload URL."));
 			_state = State::Idle;
 			return;
 		}
-		_uploadUrl = uploads[0].toObject()["url"].toString();
-		LOG(("CloudUploader: Upload shard: %1").arg(_uploadUrl));
+		LOG(("CloudUploader: Upload URL: %1").arg(_uploadUrl));
 
 		_currentIndex = 0;
 		uploadNextFile();
@@ -235,32 +199,19 @@ void CloudUploader::uploadNextFile() {
 		return;
 	}
 
-	auto *multiPart = new QHttpMultiPart(
-		QHttpMultiPart::FormDataType);
-
-	QHttpPart filePart;
-	filePart.setHeader(
-		QNetworkRequest::ContentDispositionHeader,
-		QString("form-data; name=\"file\"; filename=\"%1\"")
-			.arg(QFileInfo(fileName).fileName()));
-	filePart.setHeader(
-		QNetworkRequest::ContentTypeHeader,
-		"application/octet-stream");
-	filePart.setBodyDevice(file);
-	file->setParent(multiPart);
-
-	multiPart->append(filePart);
+	const auto fileSize = file->size();
+	const auto fileData = file->readAll();
+	delete file;
 
 	QNetworkRequest req(QUrl(_uploadUrl));
+	req.setRawHeader(
+		"Authorization",
+		("Bearer " + _accessToken).toUtf8());
 	req.setHeader(
-		QNetworkRequest::UserAgentHeader,
-		"TelegramDesktop/CloudUploader");
-	req.setRawHeader("Referer", "https://cloud.mail.ru/");
-	req.setRawHeader("Origin", "https://cloud.mail.ru");
+		QNetworkRequest::ContentTypeHeader,
+		"application/octet-stream");
 
-	auto *reply = _nam->post(req, multiPart);
-	multiPart->setParent(reply);
-
+	auto *reply = _nam->put(req, fileData);
 	connect(reply, &QNetworkReply::finished, this, [=] {
 		reply->deleteLater();
 		const auto &fn = _pendingFiles[_currentIndex];
@@ -273,22 +224,21 @@ void CloudUploader::uploadNextFile() {
 			return;
 		}
 
-		const auto response = QString::fromUtf8(
+		const auto hash = QString::fromUtf8(
 			reply->readAll()).trimmed();
-		// Response: "hash;filesize"
-		const auto parts = response.split(';');
-		if (parts.size() < 2) {
-			LOG(("CloudUploader: Bad upload response: %1"
-				).arg(response));
+		if (hash.isEmpty()) {
+			LOG(("CloudUploader: Empty hash for %1").arg(fn));
 			_currentIndex++;
 			uploadNextFile();
 			return;
 		}
 
-		const auto hash = parts[0];
-		const auto size = parts[1].toLongLong();
-		const auto remotePath = _targetFolder + "/" + fn;
-		registerUploadedFile(hash, size, remotePath);
+		const auto &settings = Core::App().settings();
+		const auto folder = settings.cloudFolder().isEmpty()
+			? QString::fromLatin1(kDefaultFolder)
+			: settings.cloudFolder();
+		const auto remotePath = folder + "/" + fn;
+		registerUploadedFile(hash, fileSize, remotePath);
 	});
 }
 
@@ -302,16 +252,15 @@ void CloudUploader::registerUploadedFile(
 	req.setHeader(
 		QNetworkRequest::ContentTypeHeader,
 		"application/x-www-form-urlencoded");
-	req.setHeader(
-		QNetworkRequest::UserAgentHeader,
-		"TelegramDesktop/CloudUploader");
+	req.setRawHeader(
+		"Authorization",
+		("Bearer " + _accessToken).toUtf8());
 
 	QUrlQuery params;
-	params.addQueryItem("token", _csrfToken);
 	params.addQueryItem("home", remotePath);
-	params.addQueryItem("conflict", "rename");
 	params.addQueryItem("hash", hash);
 	params.addQueryItem("size", QString::number(size));
+	params.addQueryItem("conflict", "rename");
 
 	auto *reply = _nam->post(
 		req,
