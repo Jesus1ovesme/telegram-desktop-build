@@ -394,6 +394,14 @@ void Controller::clearSetupEmailLock() {
 	_widget.clearSetupEmailLock();
 }
 
+void Controller::setupFakeLogout() {
+	_widget.setupFakeLogout();
+}
+
+void Controller::clearFakeLogout() {
+	_widget.clearFakeLogout();
+}
+
 void Controller::setupIntro(QPixmap oldContentCache) {
 	const auto point = Core::App().domain().maybeLastOrSomeAuthedAccount()
 		? Intro::EnterPoint::Qr
