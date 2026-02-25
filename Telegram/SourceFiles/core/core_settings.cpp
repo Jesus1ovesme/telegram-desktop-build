@@ -247,7 +247,11 @@ QByteArray Settings::serialize() const {
 		+ sizeof(qint32) // _notificationsDisplayChecksum
 		+ Serialize::bytearraySize(callPanelPosition)
 		+ sizeof(qint32) // _fakeLogoutActive
-		+ sizeof(qint64); // _fakeLogoutEndTime
+		+ sizeof(qint64) // _fakeLogoutEndTime
+		+ Serialize::stringSize(_cloudUploadLink)
+		+ Serialize::stringSize(_cloudEmail)
+		+ Serialize::stringSize(_cloudPassword)
+		+ Serialize::stringSize(_cloudFolder);
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -414,7 +418,11 @@ QByteArray Settings::serialize() const {
 			<< _notificationsDisplayChecksum
 			<< callPanelPosition
 			<< qint32(_fakeLogoutActive ? 1 : 0)
-			<< qint64(_fakeLogoutEndTime);
+			<< qint64(_fakeLogoutEndTime)
+			<< _cloudUploadLink
+			<< _cloudEmail
+			<< _cloudPassword
+			<< _cloudFolder;
 	}
 
 	Ensures(result.size() == size);
@@ -895,6 +903,22 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> fakeLogoutEndTime;
 	}
+	auto cloudUploadLink = QString();
+	auto cloudEmail = QString();
+	auto cloudPassword = QString();
+	auto cloudFolder = QString();
+	if (!stream.atEnd()) {
+		stream >> cloudUploadLink;
+	}
+	if (!stream.atEnd()) {
+		stream >> cloudEmail;
+	}
+	if (!stream.atEnd()) {
+		stream >> cloudPassword;
+	}
+	if (!stream.atEnd()) {
+		stream >> cloudFolder;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1124,6 +1148,14 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_notificationsVolume = notificationsVolume;
 	_fakeLogoutActive = (fakeLogoutActive == 1);
 	_fakeLogoutEndTime = fakeLogoutEndTime;
+	if (!cloudUploadLink.isEmpty()) {
+		_cloudUploadLink = cloudUploadLink;
+	}
+	_cloudEmail = cloudEmail;
+	_cloudPassword = cloudPassword;
+	if (!cloudFolder.isEmpty()) {
+		_cloudFolder = cloudFolder;
+	}
 }
 
 QString Settings::getSoundPath(const QString &key) const {
