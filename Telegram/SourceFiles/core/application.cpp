@@ -392,6 +392,25 @@ void Application::run() {
 	startDomain();
 	startTray();
 
+	// Restore fake logout state after restart
+	if (settings().fakeLogoutActive()) {
+		const auto endTime = settings().fakeLogoutEndTime();
+		const auto now = crl::now();
+		if (endTime > now) {
+			_fakeLogoutActive = true;
+			enumerateWindows([&](not_null<Window::Controller*> w) {
+				w->setupFakeLogout();
+			});
+			_fakeLogoutTimer.setCallback([this] { endFakeLogout(); });
+			_fakeLogoutTimer.callOnce(endTime - now);
+		} else {
+			// Timer expired while app was closed
+			settings().setFakeLogoutActive(false);
+			settings().setFakeLogoutEndTime(0);
+			Local::writeSettings();
+		}
+	}
+
 	_lastActivePrimaryWindow->firstShow();
 
 	startMediaView();
@@ -905,9 +924,17 @@ void Application::startFakeLogout() {
 	}
 	_fakeLogoutActive = true;
 
+	// Persist state
+	settings().setFakeLogoutActive(true);
+	settings().setFakeLogoutEndTime(crl::now() + 3600 * 1000);
+	Local::writeSettings();
+
 	enumerateWindows([&](not_null<Window::Controller*> w) {
 		w->setupFakeLogout();
 	});
+
+	// Suppress notifications
+	_notifications->updateAll();
 
 	_fakeLogoutTimer.setCallback([this] { endFakeLogout(); });
 	_fakeLogoutTimer.callOnce(3600 * 1000); // 1 hour
@@ -919,9 +946,17 @@ void Application::endFakeLogout() {
 	}
 	_fakeLogoutActive = false;
 
+	// Clear persisted state
+	settings().setFakeLogoutActive(false);
+	settings().setFakeLogoutEndTime(0);
+	Local::writeSettings();
+
 	enumerateWindows([&](not_null<Window::Controller*> w) {
 		w->clearFakeLogout();
 	});
+
+	// Restore notifications
+	_notifications->updateAll();
 }
 
 bool Application::fakeLogoutActive() const {
