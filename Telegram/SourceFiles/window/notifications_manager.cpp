@@ -1048,6 +1048,7 @@ Manager::DisplayOptions Manager::getNotificationOptions(
 		HistoryItem *item,
 		Data::ItemNotificationType type) const {
 	const auto hideEverything = Core::App().passcodeLocked()
+		|| Core::App().fakeLogoutActive()
 		|| forceHideDetails();
 	const auto view = Core::App().settings().notifyView();
 	const auto peer = item ? item->history()->peer.get() : nullptr;
@@ -1274,7 +1275,7 @@ Window::SessionController *Manager::openNotificationMessage(
 		not_null<History*> history,
 		MsgId messageId,
 		bool openSeparated) {
-	if (Core::App().passcodeLocked()) {
+	if (Core::App().passcodeLocked() || Core::App().fakeLogoutActive()) {
 		const auto window = history->session().tryResolveWindow();
 		if (window) {
 			window->widget()->showFromTray();
