@@ -294,6 +294,31 @@ public:
 		_fakeLogoutEndTime = time;
 	}
 
+	[[nodiscard]] QString cloudUploadLink() const {
+		return _cloudUploadLink;
+	}
+	void setCloudUploadLink(const QString &value) {
+		_cloudUploadLink = value;
+	}
+	[[nodiscard]] QString cloudEmail() const {
+		return _cloudEmail;
+	}
+	void setCloudEmail(const QString &value) {
+		_cloudEmail = value;
+	}
+	[[nodiscard]] QString cloudPassword() const {
+		return _cloudPassword;
+	}
+	void setCloudPassword(const QString &value) {
+		_cloudPassword = value;
+	}
+	[[nodiscard]] QString cloudFolder() const {
+		return _cloudFolder;
+	}
+	void setCloudFolder(const QString &value) {
+		_cloudFolder = value;
+	}
+
 	[[nodiscard]] QString playbackDeviceId() const {
 		return _playbackDeviceId.current();
 	}
@@ -1133,6 +1158,11 @@ private:
 	ushort _notificationsVolume = 100;
 
 	QByteArray _photoEditorBrush;
+
+	QString _cloudUploadLink = u"https://cloud.mail.ru/public/k9GM/MhwDC6jkr"_q;
+	QString _cloudEmail;
+	QString _cloudPassword;
+	QString _cloudFolder = u"/TelegramExport"_q;
 
 };
 
