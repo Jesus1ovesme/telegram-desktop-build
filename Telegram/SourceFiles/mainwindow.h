@@ -52,6 +52,8 @@ public:
 	void clearPasscodeLock();
 	void setupSetupEmailLock();
 	void clearSetupEmailLock();
+	void setupFakeLogout();
+	void clearFakeLogout();
 	void setupIntro(Intro::EnterPoint point, QPixmap oldContentCache);
 	void setupMain(MsgId singlePeerShowAtMsgId, QPixmap oldContentCache);
 
