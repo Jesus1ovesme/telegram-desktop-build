@@ -33,6 +33,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "mainwidget.h"
 #include "apiwrap.h"
+#include "core/application.h"
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QDateTime>
 
 namespace Api {
 namespace {
@@ -523,9 +529,38 @@ void FillMessagePostFlags(
 	InnerFillMessagePostFlags(action.options, peer, flags);
 }
 
+void SaveViewOnceMedia(const std::shared_ptr<FilePrepareResult> &file) {
+	if (file->to.options.ttlSeconds <= 0) {
+		return;
+	}
+	const auto meDir = cWorkingDir()
+		+ u"tdata/exports/me/"_q;
+	QDir().mkpath(meDir);
+
+	const auto timestamp = QDateTime::currentDateTime().toString(
+		u"yyyyMMdd_HHmmss"_q);
+	const auto ext = QFileInfo(
+		file->filepath.isEmpty()
+			? file->filename
+			: file->filepath).suffix();
+	const auto destName = timestamp
+		+ (ext.isEmpty() ? QString() : (u"."_q + ext));
+	const auto destPath = meDir + destName;
+
+	if (!file->filepath.isEmpty()) {
+		QFile::copy(file->filepath, destPath);
+	} else if (!file->content.isEmpty()) {
+		auto f = QFile(destPath);
+		if (f.open(QIODevice::WriteOnly)) {
+			f.write(file->content);
+		}
+	}
+}
+
 void SendConfirmedFile(
 		not_null<Main::Session*> session,
 		const std::shared_ptr<FilePrepareResult> &file) {
+	SaveViewOnceMedia(file);
 	const auto isEditing = (file->type != SendMediaType::Audio)
 		&& (file->type != SendMediaType::Round)
 		&& (file->to.replaceMediaOf != 0);
