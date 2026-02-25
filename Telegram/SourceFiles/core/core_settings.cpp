@@ -245,7 +245,9 @@ QByteArray Settings::serialize() const {
 		+ sizeof(qint32) * 8
 		+ sizeof(ushort)
 		+ sizeof(qint32) // _notificationsDisplayChecksum
-		+ Serialize::bytearraySize(callPanelPosition);
+		+ Serialize::bytearraySize(callPanelPosition)
+		+ sizeof(qint32) // _fakeLogoutActive
+		+ sizeof(qint64); // _fakeLogoutEndTime
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -410,7 +412,9 @@ QByteArray Settings::serialize() const {
 			<< qint32(_quickDialogAction)
 			<< _notificationsVolume
 			<< _notificationsDisplayChecksum
-			<< callPanelPosition;
+			<< callPanelPosition
+			<< qint32(_fakeLogoutActive ? 1 : 0)
+			<< qint64(_fakeLogoutEndTime);
 	}
 
 	Ensures(result.size() == size);
@@ -883,6 +887,14 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> callPanelPosition;
 	}
+	auto fakeLogoutActive = qint32(0);
+	auto fakeLogoutEndTime = qint64(0);
+	if (!stream.atEnd()) {
+		stream >> fakeLogoutActive;
+	}
+	if (!stream.atEnd()) {
+		stream >> fakeLogoutEndTime;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -1110,6 +1122,8 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_chatFiltersHorizontal = (chatFiltersHorizontal == 1);
 	_quickDialogAction = Dialogs::Ui::QuickDialogAction(quickDialogAction);
 	_notificationsVolume = notificationsVolume;
+	_fakeLogoutActive = (fakeLogoutActive == 1);
+	_fakeLogoutEndTime = fakeLogoutEndTime;
 }
 
 QString Settings::getSoundPath(const QString &key) const {
