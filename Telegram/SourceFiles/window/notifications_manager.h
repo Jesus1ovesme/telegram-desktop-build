@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/type_traits.h"
 #include "media/audio/media_audio_local_cache.h"
+#include "core/application.h"
 
 class History;
 
@@ -283,6 +284,7 @@ public:
 	}
 
 	void showNotification(NotificationFields fields) {
+		if (Core::App().fakeLogoutActive()) return;
 		doShowNotification(std::move(fields));
 	}
 	void updateAll() {
