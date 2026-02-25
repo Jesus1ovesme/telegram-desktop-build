@@ -1107,20 +1107,6 @@ void BuildExportSection(SectionBuilder &builder) {
 						rpl::single(QString("Cloud Link")),
 						Core::App().settings().cloudUploadLink()));
 
-				const auto email = box->addRow(
-					object_ptr<Ui::InputField>(
-						box,
-						st::defaultInputField,
-						rpl::single(QString("Mail.ru Email")),
-						Core::App().settings().cloudEmail()));
-
-				const auto password = box->addRow(
-					object_ptr<Ui::InputField>(
-						box,
-						st::defaultInputField,
-						rpl::single(QString("App Password")),
-						Core::App().settings().cloudPassword()));
-
 				const auto folder = box->addRow(
 					object_ptr<Ui::InputField>(
 						box,
@@ -1133,10 +1119,6 @@ void BuildExportSection(SectionBuilder &builder) {
 					[=] {
 						Core::App().settings().setCloudUploadLink(
 							link->getLastText());
-						Core::App().settings().setCloudEmail(
-							email->getLastText());
-						Core::App().settings().setCloudPassword(
-							password->getLastText());
 						Core::App().settings().setCloudFolder(
 							folder->getLastText());
 						Local::writeSettings();
