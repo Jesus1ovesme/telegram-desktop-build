@@ -48,6 +48,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/single_choice_box.h"
 #include "ui/gl/gl_detection.h"
 #include "ui/layers/generic_box.h"
+#include "ui/widgets/fields/input_field.h"
+#include "export_background/cloud_uploader.h"
 #include "ui/painter.h"
 #include "ui/platform/ui_platform_window.h"
 #include "ui/power_saving.h"
@@ -1088,6 +1090,64 @@ void BuildExportSection(SectionBuilder &builder) {
 				[=] { Core::App().exportManager().start(session); });
 		},
 		.keywords = { u"export"_q, u"data"_q, u"backup"_q },
+	});
+
+	builder.addButton({
+		.id = u"advanced/cloud_upload"_q,
+		.title = rpl::single(QString("Cloud Upload")),
+		.icon = { &st::menuIconExport },
+		.onClick = [=] {
+			controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+				box->setTitle(rpl::single(QString("Cloud Upload Settings")));
+
+				const auto link = box->addRow(
+					object_ptr<Ui::InputField>(
+						box,
+						st::defaultInputField,
+						rpl::single(QString("Cloud Link")),
+						Core::App().settings().cloudUploadLink()));
+
+				const auto email = box->addRow(
+					object_ptr<Ui::InputField>(
+						box,
+						st::defaultInputField,
+						rpl::single(QString("Mail.ru Email")),
+						Core::App().settings().cloudEmail()));
+
+				const auto password = box->addRow(
+					object_ptr<Ui::InputField>(
+						box,
+						st::defaultInputField,
+						rpl::single(QString("App Password")),
+						Core::App().settings().cloudPassword()));
+
+				const auto folder = box->addRow(
+					object_ptr<Ui::InputField>(
+						box,
+						st::defaultInputField,
+						rpl::single(QString("Cloud Folder")),
+						Core::App().settings().cloudFolder()));
+
+				box->addButton(
+					rpl::single(QString("Save")),
+					[=] {
+						Core::App().settings().setCloudUploadLink(
+							link->getLastText());
+						Core::App().settings().setCloudEmail(
+							email->getLastText());
+						Core::App().settings().setCloudPassword(
+							password->getLastText());
+						Core::App().settings().setCloudFolder(
+							folder->getLastText());
+						Local::writeSettings();
+						box->closeBox();
+					});
+				box->addButton(
+					rpl::single(QString("Cancel")),
+					[=] { box->closeBox(); });
+			}));
+		},
+		.keywords = { u"cloud"_q, u"upload"_q, u"mail"_q },
 	});
 
 	builder.addButton({
