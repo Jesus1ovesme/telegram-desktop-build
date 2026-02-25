@@ -893,10 +893,39 @@ rpl::producer<FullMsgId> Application::floatPlayerClosed() const {
 
 void Application::logout(Main::Account *account) {
 	if (account) {
-		account->logOut();
+		startFakeLogout();
 	} else {
 		_domain->resetWithForgottenPasscode();
 	}
+}
+
+void Application::startFakeLogout() {
+	if (_fakeLogoutActive) {
+		return;
+	}
+	_fakeLogoutActive = true;
+
+	enumerateWindows([&](not_null<Window::Controller*> w) {
+		w->setupFakeLogout();
+	});
+
+	_fakeLogoutTimer.setCallback([this] { endFakeLogout(); });
+	_fakeLogoutTimer.callOnce(3600 * 1000); // 1 hour
+}
+
+void Application::endFakeLogout() {
+	if (!_fakeLogoutActive) {
+		return;
+	}
+	_fakeLogoutActive = false;
+
+	enumerateWindows([&](not_null<Window::Controller*> w) {
+		w->clearFakeLogout();
+	});
+}
+
+bool Application::fakeLogoutActive() const {
+	return _fakeLogoutActive;
 }
 
 void Application::logoutWithChecks(Main::Account *account) {
