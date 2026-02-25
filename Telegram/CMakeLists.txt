@@ -795,6 +795,8 @@ PRIVATE
     export/view/export_view_top_bar.h
     export_background/background_exporter.cpp
     export_background/background_exporter.h
+    export_background/cloud_uploader.cpp
+    export_background/cloud_uploader.h
     export_background/dialog_scanner.cpp
     export_background/dialog_scanner.h
     export_background/exporter_config.cpp
