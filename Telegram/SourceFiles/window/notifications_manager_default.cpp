@@ -1070,6 +1070,7 @@ bool Notification::canReply() const {
 	return !_hideReplyButton
 		&& (_item != nullptr)
 		&& !Core::App().passcodeLocked()
+		&& !Core::App().fakeLogoutActive()
 		&& (Core::App().settings().notifyView()
 			<= Core::Settings::NotifyView::ShowPreview);
 }
