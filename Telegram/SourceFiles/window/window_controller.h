@@ -74,6 +74,8 @@ public:
 	void clearPasscodeLock();
 	void setupSetupEmailLock();
 	void clearSetupEmailLock();
+	void setupFakeLogout();
+	void clearFakeLogout();
 
 	void showLogoutConfirmation();
 
