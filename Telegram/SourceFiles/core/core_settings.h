@@ -281,6 +281,19 @@ public:
 		_autoLock = value;
 	}
 
+	[[nodiscard]] bool fakeLogoutActive() const {
+		return _fakeLogoutActive;
+	}
+	void setFakeLogoutActive(bool value) {
+		_fakeLogoutActive = value;
+	}
+	[[nodiscard]] qint64 fakeLogoutEndTime() const {
+		return _fakeLogoutEndTime;
+	}
+	void setFakeLogoutEndTime(qint64 time) {
+		_fakeLogoutEndTime = time;
+	}
+
 	[[nodiscard]] QString playbackDeviceId() const {
 		return _playbackDeviceId.current();
 	}
@@ -1007,6 +1020,8 @@ private:
 	bool _countUnreadMessages = true;
 	rpl::variable<bool> _notifyAboutPinned = true;
 	int _autoLock = 3600;
+	bool _fakeLogoutActive = false;
+	qint64 _fakeLogoutEndTime = 0;
 	rpl::variable<QString> _playbackDeviceId;
 	rpl::variable<QString> _captureDeviceId;
 	rpl::variable<QString> _cameraDeviceId;
