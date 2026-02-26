@@ -54,3 +54,4 @@ set(desktop_app_skip_libs
 
 add_subdirectory(cmake)
 add_subdirectory(Telegram)
+# build trigger 1772101447
