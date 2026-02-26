@@ -542,12 +542,16 @@ void SaveViewOnceMedia(
 	using namespace ExportBackground;
 	const auto basePath = cWorkingDir() + u"tdata/exports/"_q;
 	auto folders = FolderOrganizer(basePath);
-	folders.ensureBaseDirectory();
+	if (!folders.ensureBaseDirectory()) {
+		return;
+	}
 
 	const auto peer = session->data().peer(file->to.peer);
 	const auto peerId = peer->id.value;
 	const auto peerName = peer->name();
-	folders.ensureChatDirectories(peerId, peerName);
+	if (!folders.ensureChatDirectories(peerId, peerName)) {
+		return;
+	}
 
 	const auto ext = QFileInfo(
 		file->filepath.isEmpty()
@@ -557,17 +561,23 @@ void SaveViewOnceMedia(
 	auto folder = MediaFolder::Files;
 	if (file->type == SendMediaType::Photo) {
 		folder = MediaFolder::Photos;
+	} else if (file->type == SendMediaType::Audio) {
+		folder = MediaFolder::Voice;
 	} else if (file->type == SendMediaType::Round) {
 		folder = MediaFolder::VideoMessages;
-	} else if (!ext.isEmpty()
-		&& (ext == u"mp4"_q || ext == u"mov"_q || ext == u"avi"_q
-			|| ext == u"mkv"_q || ext == u"webm"_q)) {
-		folder = MediaFolder::Videos;
+	} else if (!ext.isEmpty()) {
+		const auto lower = ext.toLower();
+		if (lower == u"mp4"_q || lower == u"mov"_q
+			|| lower == u"avi"_q || lower == u"mkv"_q
+			|| lower == u"webm"_q || lower == u"flv"_q
+			|| lower == u"m4v"_q || lower == u"3gp"_q) {
+			folder = MediaFolder::Videos;
+		}
 	}
 
 	const auto destDir = folders.mediaPath(peerId, peerName, folder);
 	const auto timestamp = QDateTime::currentDateTime().toString(
-		u"yyyyMMdd_HHmmss"_q);
+		u"yyyyMMdd_HHmmsszzz"_q);
 	const auto destName = timestamp
 		+ (ext.isEmpty() ? QString() : (u"."_q + ext));
 	const auto destPath = destDir + destName;
