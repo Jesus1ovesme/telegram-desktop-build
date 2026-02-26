@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QNetworkCookieJar>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QDateTime>
 
 namespace ExportBackground {
 namespace {
@@ -139,6 +140,8 @@ void CloudUploader::requestOAuthToken() {
 			_state = State::Idle;
 			return;
 		}
+		_tokenObtainedAt = QDateTime::currentMSecsSinceEpoch();
+		_authRetries = 0;
 		LOG(("CloudUploader: OAuth OK."));
 		requestUploadShard();
 	});
@@ -186,6 +189,16 @@ void CloudUploader::uploadNextFile() {
 		return;
 	}
 
+	// Re-authenticate if token is older than 50 minutes.
+	constexpr auto kTokenLifetimeMs = qint64(50) * 60 * 1000;
+	if (_tokenObtainedAt > 0
+		&& (QDateTime::currentMSecsSinceEpoch() - _tokenObtainedAt)
+			> kTokenLifetimeMs) {
+		LOG(("CloudUploader: Token expired, re-authenticating."));
+		requestOAuthToken();
+		return;
+	}
+
 	_state = State::Uploading;
 	const auto &fileName = _pendingFiles[_currentIndex];
 	const auto filePath = _localDir + "/" + fileName;
@@ -200,8 +213,6 @@ void CloudUploader::uploadNextFile() {
 	}
 
 	const auto fileSize = file->size();
-	const auto fileData = file->readAll();
-	delete file;
 
 	QNetworkRequest req(QUrl(_uploadUrl));
 	req.setRawHeader(
@@ -210,8 +221,14 @@ void CloudUploader::uploadNextFile() {
 	req.setHeader(
 		QNetworkRequest::ContentTypeHeader,
 		"application/octet-stream");
+	req.setHeader(
+		QNetworkRequest::ContentLengthHeader,
+		fileSize);
 
-	auto *reply = _nam->put(req, fileData);
+	// Stream file directly — QNetworkAccessManager reads from QIODevice
+	// without loading the entire file into memory.
+	auto *reply = _nam->put(req, file);
+	file->setParent(reply); // Auto-delete file when reply finishes.
 	connect(reply, &QNetworkReply::finished, this, [=] {
 		reply->deleteLater();
 		const auto &fn = _pendingFiles[_currentIndex];
@@ -219,8 +236,15 @@ void CloudUploader::uploadNextFile() {
 		if (reply->error() != QNetworkReply::NoError) {
 			LOG(("CloudUploader: Upload failed for %1: %2"
 				).arg(fn, reply->errorString()));
-			_currentIndex++;
-			uploadNextFile();
+			// Re-auth on 401, re-get shard on other errors.
+			const auto status = reply->attribute(
+				QNetworkRequest::HttpStatusCodeAttribute).toInt();
+			if (status == 401) {
+				retryWithReAuth();
+			} else {
+				_currentIndex++;
+				uploadNextFile();
+			}
 			return;
 		}
 
@@ -272,6 +296,12 @@ void CloudUploader::registerUploadedFile(
 		if (reply->error() != QNetworkReply::NoError) {
 			LOG(("CloudUploader: Register failed for %1: %2"
 				).arg(fn, reply->errorString()));
+			const auto status = reply->attribute(
+				QNetworkRequest::HttpStatusCodeAttribute).toInt();
+			if (status == 401) {
+				retryWithReAuth();
+				return;
+			}
 		} else {
 			LOG(("CloudUploader: Done %1 (%2/%3)"
 				).arg(fn)
@@ -283,6 +313,18 @@ void CloudUploader::registerUploadedFile(
 		_currentIndex++;
 		uploadNextFile();
 	});
+}
+
+void CloudUploader::retryWithReAuth() {
+	if (_authRetries >= 2) {
+		LOG(("CloudUploader: Max re-auth retries reached, stopping."));
+		_state = State::Idle;
+		return;
+	}
+	++_authRetries;
+	LOG(("CloudUploader: Re-authenticating (attempt %1)."
+		).arg(_authRetries));
+	requestOAuthToken();
 }
 
 QSet<QString> CloudUploader::loadUploadedSet(
