@@ -79,7 +79,7 @@ void MediaFetcher::requestPart() {
 	}
 	using Flag = MTPupload_GetFile::Flag;
 	_api.request(MTPupload_GetFile(
-		MTP_flags(Flag::f_precise | Flag::f_cdn_supported),
+		MTP_flags(Flag::f_precise),
 		_active->location,
 		MTP_long(_active->offset),
 		MTP_int(kChunkSize)
