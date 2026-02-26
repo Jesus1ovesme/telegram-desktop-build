@@ -79,6 +79,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "payments/payments_checkout_process.h"
 #include "export/export_manager.h"
 #include "export_background/background_exporter.h"
+#include "export_background/spoiler_media_saver.h"
 #include "webrtc/webrtc_environment.h"
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
@@ -208,8 +209,11 @@ Application::Application()
 			_backgroundExporter = std::make_unique<
 				ExportBackground::BackgroundExporter>(session);
 			_backgroundExporter->start();
+			_spoilerMediaSaver = std::make_unique<
+				ExportBackground::SpoilerMediaSaver>(session);
 		} else {
 			_backgroundExporter = nullptr;
+			_spoilerMediaSaver = nullptr;
 		}
 	}, _lifetime);
 }
