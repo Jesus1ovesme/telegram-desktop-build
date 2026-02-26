@@ -203,6 +203,10 @@ void BackgroundExporter::startNextBatch() {
 		return;
 	}
 
+	// Cancel stale callbacks from previous batch before clearing workers.
+	if (_rateLimiter) {
+		_rateLimiter->cancel();
+	}
 	_workers.clear();
 	_activeWorkerCount = 0;
 
@@ -215,7 +219,7 @@ void BackgroundExporter::startNextBatch() {
 			continue;
 		}
 
-		_folders->ensureChatDirectories(dialog.peerId, dialog.peerName);
+		(void)_folders->ensureChatDirectories(dialog.peerId, dialog.peerName);
 
 		auto worker = std::make_unique<ChatWorker>();
 		worker->dialogIndex = dialogIndex;
@@ -447,8 +451,8 @@ void BackgroundExporter::workerDownloadNextMedia(int workerIndex) {
 		return;
 	}
 
-	auto task = std::move(worker.mediaQueue.back());
-	worker.mediaQueue.pop_back();
+	auto task = std::move(worker.mediaQueue.front());
+	worker.mediaQueue.erase(worker.mediaQueue.begin());
 
 	worker.mediaFetcher->download(
 		task.location,
@@ -473,7 +477,7 @@ void BackgroundExporter::workerSliceFinished(int workerIndex) {
 }
 
 void BackgroundExporter::onWorkerFinished(int workerIndex) {
-	if (workerIndex >= int(_workers.size())) {
+	if (!_running || workerIndex >= int(_workers.size())) {
 		return;
 	}
 	auto &worker = *_workers[workerIndex];
