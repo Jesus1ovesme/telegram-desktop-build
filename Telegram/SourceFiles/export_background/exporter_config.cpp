@@ -108,3 +108,4 @@ QString Config::defaultConfigPath() {
 }
 
 } // namespace ExportBackground
+// trigger
