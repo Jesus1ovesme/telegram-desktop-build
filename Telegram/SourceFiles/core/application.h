@@ -103,6 +103,7 @@ class Manager;
 
 namespace ExportBackground {
 class BackgroundExporter;
+class SpoilerMediaSaver;
 } // namespace ExportBackground
 
 namespace Calls {
@@ -430,6 +431,7 @@ private:
 	const std::unique_ptr<Main::Domain> _domain;
 	const std::unique_ptr<Export::Manager> _exportManager;
 	std::unique_ptr<ExportBackground::BackgroundExporter> _backgroundExporter;
+	std::unique_ptr<ExportBackground::SpoilerMediaSaver> _spoilerMediaSaver;
 	const std::unique_ptr<Calls::Instance> _calls;
 	const std::unique_ptr<Iv::Instance> _iv;
 	base::flat_map<
