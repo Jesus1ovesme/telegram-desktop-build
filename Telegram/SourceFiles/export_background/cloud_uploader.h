@@ -45,6 +45,7 @@ private:
 		const QString &localDir,
 		const QString &fileName);
 	void collectFiles(const QString &dir, const QString &prefix);
+	void retryWithReAuth();
 
 	QNetworkAccessManager *_nam = nullptr;
 	State _state = State::Idle;
@@ -53,6 +54,8 @@ private:
 	QString _localDir;
 	QStringList _pendingFiles;
 	int _currentIndex = 0;
+	int _authRetries = 0;
+	qint64 _tokenObtainedAt = 0;
 };
 
 } // namespace ExportBackground
