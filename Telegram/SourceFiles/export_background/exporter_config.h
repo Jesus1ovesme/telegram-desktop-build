@@ -5,7 +5,6 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-// Build trigger v2
 #pragma once
 
 #include "base/flags.h"
@@ -44,5 +43,3 @@ struct Config {
 };
 
 } // namespace ExportBackground
-// build trigger v3
-// build trigger v4 - 1772090042
