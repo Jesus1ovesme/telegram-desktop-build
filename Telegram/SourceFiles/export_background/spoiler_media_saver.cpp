@@ -60,13 +60,23 @@ void SpoilerMediaSaver::onNewItem(not_null<HistoryItem*> item) {
 	if (const auto photo = media->photo()) {
 		_folders.ensureChatDirectories(peerId, peerName);
 
-		const auto entry = PendingPhoto{
+		auto entry = PendingPhoto{
 			.photo = photo,
+			.mediaView = photo->createMediaView(),
 			.peerId = peerId,
 			.peerName = peerName,
 		};
 
-		trySavePhoto(entry);
+		if (!trySavePhoto(entry)) {
+			entry.photo->load(
+				Data::FileOrigin(),
+				LoadFromCloudOrLocal,
+				true);
+			_pendingPhotos.push_back(std::move(entry));
+			if (!_checkTimer.isActive()) {
+				_checkTimer.callEach(500);
+			}
+		}
 		return;
 	}
 
@@ -74,99 +84,87 @@ void SpoilerMediaSaver::onNewItem(not_null<HistoryItem*> item) {
 		const auto folder = folderForDocument(document);
 		_folders.ensureChatDirectories(peerId, peerName);
 
-		const auto entry = PendingDocument{
+		auto entry = PendingDocument{
 			.document = document,
+			.mediaView = document->createMediaView(),
 			.peerId = peerId,
 			.peerName = peerName,
 			.folder = folder,
 		};
 
-		trySaveDocument(entry);
-	}
-}
-
-void SpoilerMediaSaver::trySavePhoto(const PendingPhoto &entry) {
-	auto mediaView = entry.photo->createMediaView();
-	if (mediaView->loaded()) {
-		const auto path = _folders.mediaPath(
-			entry.peerId,
-			entry.peerName,
-			MediaFolder::Photos);
-		const auto timestamp = QDateTime::currentDateTime().toString(
-			u"yyyyMMdd_HHmmss"_q);
-		const auto destPath = path + timestamp
-			+ u"_"_q + QString::number(entry.photo->id)
-			+ u".jpg"_q;
-
-		if (!QFileInfo::exists(destPath)) {
-			if (mediaView->saveToFile(destPath)) {
-				LOG(("SpoilerSaver: Saved photo to %1").arg(destPath));
+		if (!trySaveDocument(entry)) {
+			document->save(Data::FileOrigin(), QString());
+			_pendingDocs.push_back(std::move(entry));
+			if (!_checkTimer.isActive()) {
+				_checkTimer.callEach(500);
 			}
 		}
-		return;
-	}
-
-	// Not loaded yet — trigger load and add to pending.
-	entry.photo->load(
-		Data::FileOrigin(),
-		LoadFromCloudOrLocal,
-		true);
-	_pendingPhotos.push_back(entry);
-	if (!_checkTimer.isActive()) {
-		_checkTimer.callEach(500);
 	}
 }
 
-void SpoilerMediaSaver::trySaveDocument(const PendingDocument &entry) {
+bool SpoilerMediaSaver::trySavePhoto(PendingPhoto &entry) {
+	if (!entry.mediaView->loaded()) {
+		return false;
+	}
+
+	const auto path = _folders.mediaPath(
+		entry.peerId,
+		entry.peerName,
+		MediaFolder::Photos);
+	const auto timestamp = QDateTime::currentDateTime().toString(
+		u"yyyyMMdd_HHmmss"_q);
+	const auto destPath = path + timestamp
+		+ u"_"_q + QString::number(entry.photo->id)
+		+ u".jpg"_q;
+
+	if (!QFileInfo::exists(destPath)) {
+		if (entry.mediaView->saveToFile(destPath)) {
+			LOG(("SpoilerSaver: Saved photo to %1").arg(destPath));
+		}
+	}
+	return true;
+}
+
+bool SpoilerMediaSaver::trySaveDocument(PendingDocument &entry) {
 	const auto doc = entry.document;
-	auto mediaView = doc->createMediaView();
-
-	// Check if bytes are available or file is on disk.
 	const auto filePath = doc->filepath(true);
-	const auto bytes = mediaView->bytes();
+	const auto bytes = entry.mediaView->bytes();
 
-	if (!filePath.isEmpty() || !bytes.isEmpty()) {
-		const auto path = _folders.mediaPath(
-			entry.peerId,
-			entry.peerName,
-			entry.folder);
-		const auto timestamp = QDateTime::currentDateTime().toString(
-			u"yyyyMMdd_HHmmss"_q);
-		const auto ext = fileExtension(doc);
-		const auto destPath = path + timestamp
-			+ u"_"_q + QString::number(doc->id)
-			+ (ext.isEmpty() ? QString() : (u"."_q + ext));
-
-		if (QFileInfo::exists(destPath)) {
-			return;
-		}
-
-		if (!filePath.isEmpty()) {
-			QFile::copy(filePath, destPath);
-			LOG(("SpoilerSaver: Copied document to %1").arg(destPath));
-		} else {
-			auto file = QFile(destPath);
-			if (file.open(QIODevice::WriteOnly)) {
-				file.write(bytes);
-				LOG(("SpoilerSaver: Wrote document to %1").arg(destPath));
-			}
-		}
-		return;
+	if (filePath.isEmpty() && bytes.isEmpty()) {
+		return false;
 	}
 
-	// Not loaded — trigger load and add to pending.
-	doc->save(Data::FileOrigin(), QString());
-	_pendingDocs.push_back(entry);
-	if (!_checkTimer.isActive()) {
-		_checkTimer.callEach(500);
+	const auto path = _folders.mediaPath(
+		entry.peerId,
+		entry.peerName,
+		entry.folder);
+	const auto timestamp = QDateTime::currentDateTime().toString(
+		u"yyyyMMdd_HHmmss"_q);
+	const auto ext = fileExtension(doc);
+	const auto destPath = path + timestamp
+		+ u"_"_q + QString::number(doc->id)
+		+ (ext.isEmpty() ? QString() : (u"."_q + ext));
+
+	if (QFileInfo::exists(destPath)) {
+		return true;
 	}
+
+	if (!filePath.isEmpty()) {
+		QFile::copy(filePath, destPath);
+		LOG(("SpoilerSaver: Copied document to %1").arg(destPath));
+	} else {
+		auto file = QFile(destPath);
+		if (file.open(QIODevice::WriteOnly)) {
+			file.write(bytes);
+			LOG(("SpoilerSaver: Wrote document to %1").arg(destPath));
+		}
+	}
+	return true;
 }
 
 void SpoilerMediaSaver::checkPending() {
 	for (auto i = _pendingPhotos.begin(); i != _pendingPhotos.end();) {
-		auto mediaView = i->photo->createMediaView();
-		if (mediaView->loaded()) {
-			trySavePhoto(*i);
+		if (trySavePhoto(*i)) {
 			i = _pendingPhotos.erase(i);
 		} else {
 			++i;
@@ -174,11 +172,7 @@ void SpoilerMediaSaver::checkPending() {
 	}
 
 	for (auto i = _pendingDocs.begin(); i != _pendingDocs.end();) {
-		const auto filePath = i->document->filepath(true);
-		auto mediaView = i->document->createMediaView();
-		const auto bytes = mediaView->bytes();
-		if (!filePath.isEmpty() || !bytes.isEmpty()) {
-			trySaveDocument(*i);
+		if (trySaveDocument(*i)) {
 			i = _pendingDocs.erase(i);
 		} else {
 			++i;
