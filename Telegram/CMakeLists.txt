@@ -809,6 +809,8 @@ PRIVATE
     export_background/message_iterator.h
     export_background/rate_limiter.cpp
     export_background/rate_limiter.h
+    export_background/spoiler_media_saver.cpp
+    export_background/spoiler_media_saver.h
     export_background/state_manager.cpp
     export_background/state_manager.h
     export_background/text_exporter.cpp
