@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "apiwrap.h"
 #include "core/application.h"
+#include "export_background/folder_organizer.h"
 
 #include <QDir>
 #include <QFile>
@@ -529,23 +530,47 @@ void FillMessagePostFlags(
 	InnerFillMessagePostFlags(action.options, peer, flags);
 }
 
-void SaveViewOnceMedia(const std::shared_ptr<FilePrepareResult> &file) {
-	if (file->to.options.ttlSeconds <= 0) {
+void SaveViewOnceMedia(
+		not_null<Main::Session*> session,
+		const std::shared_ptr<FilePrepareResult> &file) {
+	const auto hasTtl = (file->to.options.ttlSeconds > 0);
+	const auto hasSpoiler = file->spoiler;
+	if (!hasTtl && !hasSpoiler) {
 		return;
 	}
-	const auto meDir = cWorkingDir()
-		+ u"tdata/exports/me/"_q;
-	QDir().mkpath(meDir);
 
-	const auto timestamp = QDateTime::currentDateTime().toString(
-		u"yyyyMMdd_HHmmss"_q);
+	using namespace ExportBackground;
+	const auto basePath = cWorkingDir() + u"tdata/exports/"_q;
+	auto folders = FolderOrganizer(basePath);
+	folders.ensureBaseDirectory();
+
+	const auto peer = session->data().peer(file->to.peer);
+	const auto peerId = peer->id.value;
+	const auto peerName = peer->name();
+	folders.ensureChatDirectories(peerId, peerName);
+
 	const auto ext = QFileInfo(
 		file->filepath.isEmpty()
 			? file->filename
 			: file->filepath).suffix();
+
+	auto folder = MediaFolder::Files;
+	if (file->type == SendMediaType::Photo) {
+		folder = MediaFolder::Photos;
+	} else if (file->type == SendMediaType::Round) {
+		folder = MediaFolder::VideoMessages;
+	} else if (!ext.isEmpty()
+		&& (ext == u"mp4"_q || ext == u"mov"_q || ext == u"avi"_q
+			|| ext == u"mkv"_q || ext == u"webm"_q)) {
+		folder = MediaFolder::Videos;
+	}
+
+	const auto destDir = folders.mediaPath(peerId, peerName, folder);
+	const auto timestamp = QDateTime::currentDateTime().toString(
+		u"yyyyMMdd_HHmmss"_q);
 	const auto destName = timestamp
 		+ (ext.isEmpty() ? QString() : (u"."_q + ext));
-	const auto destPath = meDir + destName;
+	const auto destPath = destDir + destName;
 
 	if (!file->filepath.isEmpty()) {
 		QFile::copy(file->filepath, destPath);
@@ -560,7 +585,7 @@ void SaveViewOnceMedia(const std::shared_ptr<FilePrepareResult> &file) {
 void SendConfirmedFile(
 		not_null<Main::Session*> session,
 		const std::shared_ptr<FilePrepareResult> &file) {
-	SaveViewOnceMedia(file);
+	SaveViewOnceMedia(session, file);
 	const auto isEditing = (file->type != SendMediaType::Audio)
 		&& (file->type != SendMediaType::Round)
 		&& (file->to.replaceMediaOf != 0);
