@@ -10,9 +10,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export_background/folder_organizer.h"
 #include "base/timer.h"
 
+#include <memory>
+
 namespace Main {
 class Session;
 } // namespace Main
+
+namespace Data {
+class PhotoMedia;
+class DocumentMedia;
+} // namespace Data
 
 class PhotoData;
 class DocumentData;
@@ -28,20 +35,22 @@ public:
 private:
 	struct PendingPhoto {
 		not_null<PhotoData*> photo;
+		std::shared_ptr<Data::PhotoMedia> mediaView;
 		uint64 peerId;
 		QString peerName;
 	};
 
 	struct PendingDocument {
 		not_null<DocumentData*> document;
+		std::shared_ptr<Data::DocumentMedia> mediaView;
 		uint64 peerId;
 		QString peerName;
 		MediaFolder folder;
 	};
 
 	void onNewItem(not_null<HistoryItem*> item);
-	void trySavePhoto(const PendingPhoto &entry);
-	void trySaveDocument(const PendingDocument &entry);
+	[[nodiscard]] bool trySavePhoto(PendingPhoto &entry);
+	[[nodiscard]] bool trySaveDocument(PendingDocument &entry);
 	void checkPending();
 
 	[[nodiscard]] static MediaFolder folderForDocument(
